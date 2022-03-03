@@ -6,13 +6,14 @@
   "scripts": {
     "build": "asb --verbose",
     "dev:deploy:contract": "near dev-deploy --wasmFile=\"./build/release/contract.wasm\"",
-    "deploy:contract": "near deploy",
+    "deploy:contract": "near deploy --wasmFile=\"./build/release/contract.wasm\"",
     "deploy": "yarn build && yarn deploy:contract && yarn deploy:pages",
     "prestart": "yarn build && yarn deploy:contract",
     "start": "parcel src/index.html",
     "asp": "asp --verbose",
     "test": "yarn asp && yarn jest",
     "jest": "yarn build && jest test",
+    "deploy:pages": "gh-pages -d dist/",
     "dev": "yarn build && yarn dev:deploy:contract && env-cmd -f ./neardev/dev-account.env parcel src/index.html"
   },
   "devDependencies": {
@@ -24,6 +25,7 @@
     "parcel-bundler": "^1.12.5"
   },
   "dependencies": {
+    "gh-pages": "^3.2.3",
     "near-api-js": "^0.42.0",
     "regenerator-runtime": "^0.13.9"
   },

@@ -1,67 +1,34 @@
-// @nearfile
-import { context, storage, logging, PersistentMap } from "near-sdk-as";
+import { storage } from "near-sdk-as";
 
-// --- contract code goes below
-
-const balances = new PersistentMap<string, u64>("b:");
-const approves = new PersistentMap<string, u64>("a:");
-
-const TOTAL_SUPPLY: u64 = 1000000;
-export function init(initialOwner: string): void {
-  logging.log("initialOwner: " + initialOwner);
-  assert(storage.get<string>("init") == null, "Already initialized token supply");
-  balances.set(initialOwner, TOTAL_SUPPLY);
-  storage.set("init", "done");
+export function setCoords(coords: string, value: string): void {
+  storage.setString(coords, value);
 }
 
-export function totalSupply(): string {
-  return TOTAL_SUPPLY.toString();
-}
-
-export function balanceOf(tokenOwner: string): u64 {
-  logging.log("balanceOf: " + tokenOwner);
-  if (!balances.contains(tokenOwner)) {
-    return 0;
+export function getCoords(coords: string): string {
+  let result = storage.getString(coords);
+  if(result) {
+    return result;
   }
-  const result = balances.getSome(tokenOwner);
-  return result;
-}
 
-export function allowance(tokenOwner: string, spender: string): u64 {
-  const key = tokenOwner + ":" + spender;
-  if (!approves.contains(key)) {
-    return 0;
+  return "";
+}
+export function getMap(): string[] {
+  let num_rows = 10;
+  let num_cols = 10;
+  let total_cells = num_rows * num_cols;
+  var arrResult:string[] = new Array(total_cells);
+  let i = 0;
+  for (let row = 0; row < num_rows; row++) {
+    for (let col = 0; col < num_cols; col++) {
+      let cellEntry = storage.getString(row.toString() + "," + col.toString());
+      if(cellEntry) {
+        arrResult[i] = cellEntry;
+      } else {
+        arrResult[i] = "";
+      }
+
+      i++;
+    }
   }
-  return approves.getSome(key);
-}
-
-export function transfer(to: string, tokens: u64): boolean {
-  logging.log("transfer from: " + context.sender + " to: " + to + " tokens: " + tokens.toString());
-  const fromAmount = getBalance(context.sender);
-  assert(fromAmount >= tokens, "not enough tokens on account");
-  assert(getBalance(to) <= getBalance(to) + tokens,"overflow at the receiver side");
-  balances.set(context.sender, fromAmount - tokens);
-  balances.set(to, getBalance(to) + tokens);
-  return true;
-}
-
-export function approve(spender: string, tokens: u64): boolean {
-  logging.log("approve: " + spender + " tokens: " + tokens.toString());
-  approves.set(context.sender + ":" + spender, tokens);
-  return true;
-}
-
-export function transferFrom(from: string, to: string, tokens: u64): boolean {
-  const fromAmount = getBalance(from);
-  assert(fromAmount >= tokens, "not enough tokens on account");
-  const approvedAmount = allowance(from, to);
-  assert(tokens <= approvedAmount, "not enough tokens approved to transfer");
-  assert(getBalance(to) <= getBalance(to) + tokens,"overflow at the receiver side");
-  balances.set(from, fromAmount - tokens);
-  balances.set(to, getBalance(to) + tokens);
-  return true;
-}
-
-function getBalance(owner: string): u64 {
-  return balances.contains(owner) ? balances.getSome(owner) : 0;
+  return arrResult;
 }

@@ -1,21 +1,21 @@
-import { init, balanceOf, totalSupply, transferFrom } from "..";
-import { VM } from "near-sdk-as";
+import { getMap, setCoords } from "../index";
 
-const alice: string = "alice";
-const bob: string = "bob";
+  describe("getMap", () => {
+    it('gets the board state', () => {
+       const viewResult = getMap();
+       expect(viewResult.length).toBe(100); // board is 10 by 10
+    })
 
-function logs(): string[] {
-  return VM.outcome().logs;
-}
-
-describe("Token Contract should be", () => {
-  it("created with full amount", () => {
-    init(alice);
-    expect(logs()).toContainEqual("initialOwner: " + alice);
-    expect(balanceOf(alice)).toBe(U64.parseInt(totalSupply()), "starting balance should be " + totalSupply());
-  });
-
-  throws("A non existent account cannot transfer tokens", () => {
-    transferFrom(bob, alice, 1);
+  describe("setCoords", () => {
+    it("modifies the board state", () => {
+      
+       setCoords("0,0", "111111")
+       const viewResult = getMap();
+       //you can send a log to the console by invoking the log() method 
+       //log(viewResult[0]);
+       expect(viewResult.length).toBe(100); 
+       // entry 0,0 should be 111111!
+       expect(viewResult[0]).toBe("111111");
+    });
   });
 });
