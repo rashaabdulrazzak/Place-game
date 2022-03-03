@@ -3283,7 +3283,7 @@ nacl.setPRNG = function(fn) {
 
 })(typeof module !== 'undefined' && module.exports ? module.exports : (self.nacl = self.nacl || {}));
 
-},{"crypto":"../node_modules/parcel-bundler/src/builtins/_empty.js"}],"../node_modules/borsh/node_modules/bn.js/lib/bn.js":[function(require,module,exports) {
+},{"crypto":"../node_modules/parcel-bundler/src/builtins/_empty.js"}],"../node_modules/bn.js/lib/bn.js":[function(require,module,exports) {
 var Buffer = require("buffer").Buffer;
 (function (module, exports) {
   'use strict';
@@ -3337,11 +3337,7 @@ var Buffer = require("buffer").Buffer;
 
   var Buffer;
   try {
-    if (typeof window !== 'undefined' && typeof window.Buffer !== 'undefined') {
-      Buffer = window.Buffer;
-    } else {
-      Buffer = require('buffer').Buffer;
-    }
+    Buffer = require('buffer').Buffer;
   } catch (e) {
   }
 
@@ -3382,19 +3378,23 @@ var Buffer = require("buffer").Buffer;
     var start = 0;
     if (number[0] === '-') {
       start++;
+    }
+
+    if (base === 16) {
+      this._parseHex(number, start);
+    } else {
+      this._parseBase(number, base, start);
+    }
+
+    if (number[0] === '-') {
       this.negative = 1;
     }
 
-    if (start < number.length) {
-      if (base === 16) {
-        this._parseHex(number, start, endian);
-      } else {
-        this._parseBase(number, base, start);
-        if (endian === 'le') {
-          this._initArray(this.toArray(), base, endian);
-        }
-      }
-    }
+    this._strip();
+
+    if (endian !== 'le') return;
+
+    this._initArray(this.toArray(), base, endian);
   };
 
   BN.prototype._initNumber = function _initNumber (number, base, endian) {
@@ -3470,31 +3470,39 @@ var Buffer = require("buffer").Buffer;
     return this._strip();
   };
 
-  function parseHex4Bits (string, index) {
-    var c = string.charCodeAt(index);
-    // '0' - '9'
-    if (c >= 48 && c <= 57) {
-      return c - 48;
-    // 'A' - 'F'
-    } else if (c >= 65 && c <= 70) {
-      return c - 55;
-    // 'a' - 'f'
-    } else if (c >= 97 && c <= 102) {
-      return c - 87;
-    } else {
-      assert(false, 'Invalid character in ' + string);
-    }
-  }
+  function parseHex (str, start, end) {
+    var r = 0;
+    var len = Math.min(str.length, end);
+    var z = 0;
+    for (var i = start; i < len; i++) {
+      var c = str.charCodeAt(i) - 48;
 
-  function parseHexByte (string, lowerBound, index) {
-    var r = parseHex4Bits(string, index);
-    if (index - 1 >= lowerBound) {
-      r |= parseHex4Bits(string, index - 1) << 4;
+      r <<= 4;
+
+      var b;
+
+      // 'a' - 'f'
+      if (c >= 49 && c <= 54) {
+        b = c - 49 + 0xa;
+
+      // 'A' - 'F'
+      } else if (c >= 17 && c <= 22) {
+        b = c - 17 + 0xa;
+
+      // '0' - '9'
+      } else {
+        b = c;
+      }
+
+      r |= b;
+      z |= b;
     }
+
+    assert(!(z & 0xf0), 'Invalid character in ' + str);
     return r;
   }
 
-  BN.prototype._parseHex = function _parseHex (number, start, endian) {
+  BN.prototype._parseHex = function _parseHex (number, start) {
     // Create possibly bigger array to ensure that it fits the number
     this.length = Math.ceil((number.length - start) / 6);
     this.words = new Array(this.length);
@@ -3502,38 +3510,25 @@ var Buffer = require("buffer").Buffer;
       this.words[i] = 0;
     }
 
-    // 24-bits chunks
+    var j, w;
+    // Scan 24-bit chunks and add them to the number
     var off = 0;
-    var j = 0;
-
-    var w;
-    if (endian === 'be') {
-      for (i = number.length - 1; i >= start; i -= 2) {
-        w = parseHexByte(number, start, i) << off;
-        this.words[j] |= w & 0x3ffffff;
-        if (off >= 18) {
-          off -= 18;
-          j += 1;
-          this.words[j] |= w >>> 26;
-        } else {
-          off += 8;
-        }
-      }
-    } else {
-      var parseLength = number.length - start;
-      for (i = parseLength % 2 === 0 ? start + 1 : start; i < number.length; i += 2) {
-        w = parseHexByte(number, start, i) << off;
-        this.words[j] |= w & 0x3ffffff;
-        if (off >= 18) {
-          off -= 18;
-          j += 1;
-          this.words[j] |= w >>> 26;
-        } else {
-          off += 8;
-        }
+    for (i = number.length - 6, j = 0; i >= start; i -= 6) {
+      w = parseHex(number, i, i + 6);
+      this.words[j] |= (w << off) & 0x3ffffff;
+      // NOTE: `0x3fffff` is intentional here, 26bits max shift + 24bit hex limb
+      this.words[j + 1] |= w >>> (26 - off) & 0x3fffff;
+      off += 24;
+      if (off >= 26) {
+        off -= 26;
+        j++;
       }
     }
-
+    if (i + 6 !== start) {
+      w = parseHex(number, start, i + 6);
+      this.words[j] |= (w << off) & 0x3ffffff;
+      this.words[j + 1] |= w >>> (26 - off) & 0x3fffff;
+    }
     this._strip();
   };
 
@@ -3607,8 +3602,6 @@ var Buffer = require("buffer").Buffer;
         this._iaddn(word);
       }
     }
-
-    this._strip();
   };
 
   BN.prototype.copy = function copy (dest) {
@@ -3664,11 +3657,7 @@ var Buffer = require("buffer").Buffer;
   // Check Symbol.for because not everywhere where Symbol defined
   // See https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Symbol#Browser_compatibility
   if (typeof Symbol !== 'undefined' && typeof Symbol.for === 'function') {
-    try {
-      BN.prototype[Symbol.for('nodejs.util.inspect.custom')] = inspect;
-    } catch (e) {
-      BN.prototype.inspect = inspect;
-    }
+    BN.prototype[Symbol.for('nodejs.util.inspect.custom')] = inspect;
   } else {
     BN.prototype.inspect = inspect;
   }
@@ -7080,7 +7069,7 @@ module.exports = Array.isArray || function (arr) {
   return toString.call(arr) == '[object Array]';
 };
 
-},{}],"../node_modules/buffer/index.js":[function(require,module,exports) {
+},{}],"../node_modules/node-libs-browser/node_modules/buffer/index.js":[function(require,module,exports) {
 
 var global = arguments[3];
 /*!
@@ -8873,7 +8862,7 @@ function isnan (val) {
   return val !== val // eslint-disable-line no-self-compare
 }
 
-},{"base64-js":"../node_modules/base64-js/index.js","ieee754":"../node_modules/ieee754/index.js","isarray":"../node_modules/isarray/index.js","buffer":"../node_modules/buffer/index.js"}],"../node_modules/safe-buffer/index.js":[function(require,module,exports) {
+},{"base64-js":"../node_modules/base64-js/index.js","ieee754":"../node_modules/ieee754/index.js","isarray":"../node_modules/isarray/index.js","buffer":"../node_modules/node-libs-browser/node_modules/buffer/index.js"}],"../node_modules/safe-buffer/index.js":[function(require,module,exports) {
 
 /* eslint-disable node/no-deprecated-api */
 var buffer = require('buffer')
@@ -8896,8 +8885,6 @@ if (Buffer.from && Buffer.alloc && Buffer.allocUnsafe && Buffer.allocUnsafeSlow)
 function SafeBuffer (arg, encodingOrOffset, length) {
   return Buffer(arg, encodingOrOffset, length)
 }
-
-SafeBuffer.prototype = Object.create(Buffer.prototype)
 
 // Copy static methods from Buffer
 copyProps(Buffer, SafeBuffer)
@@ -8940,7 +8927,7 @@ SafeBuffer.allocUnsafeSlow = function (size) {
   return buffer.SlowBuffer(size)
 }
 
-},{"buffer":"../node_modules/buffer/index.js"}],"../node_modules/base-x/src/index.js":[function(require,module,exports) {
+},{"buffer":"../node_modules/node-libs-browser/node_modules/buffer/index.js"}],"../node_modules/base-x/src/index.js":[function(require,module,exports) {
 'use strict'
 // base-x encoding / decoding
 // Copyright (c) 2018 base-x contributors
@@ -10109,7 +10096,7 @@ function deserializeUnchecked(schema, classType, buffer) {
 }
 exports.deserializeUnchecked = deserializeUnchecked;
 
-},{"bn.js":"../node_modules/borsh/node_modules/bn.js/lib/bn.js","bs58":"../node_modules/bs58/index.js","text-encoding-utf-8":"../node_modules/text-encoding-utf-8/lib/encoding.lib.js","buffer":"../node_modules/buffer/index.js"}],"../node_modules/near-api-js/lib/utils/serialize.js":[function(require,module,exports) {
+},{"bn.js":"../node_modules/bn.js/lib/bn.js","bs58":"../node_modules/bs58/index.js","text-encoding-utf-8":"../node_modules/text-encoding-utf-8/lib/encoding.lib.js","buffer":"../node_modules/node-libs-browser/node_modules/buffer/index.js"}],"../node_modules/near-api-js/lib/utils/serialize.js":[function(require,module,exports) {
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 var borsh_1 = require("borsh");
@@ -10662,7 +10649,7 @@ function getTransactionLastResult(txResult) {
 }
 exports.getTransactionLastResult = getTransactionLastResult;
 
-},{"buffer":"../node_modules/buffer/index.js"}],"../node_modules/near-api-js/node_modules/depd/lib/browser/index.js":[function(require,module,exports) {
+},{"buffer":"../node_modules/node-libs-browser/node_modules/buffer/index.js"}],"../node_modules/depd/lib/browser/index.js":[function(require,module,exports) {
 /*!
  * depd
  * Copyright(c) 2015 Douglas Christopher Wilson
@@ -10734,7 +10721,7 @@ function wrapproperty(obj, prop, message) {
     throw new TypeError('property must be configurable');
   }
 }
-},{}],"../node_modules/depd/lib/browser/index.js":[function(require,module,exports) {
+},{}],"../node_modules/http-errors/node_modules/depd/lib/browser/index.js":[function(require,module,exports) {
 /*!
  * depd
  * Copyright(c) 2015 Douglas Christopher Wilson
@@ -10818,7 +10805,7 @@ function setProtoOf (obj, proto) {
 
 function mixinProperties (obj, proto) {
   for (var prop in proto) {
-    if (!obj.hasOwnProperty(prop)) {
+    if (!Object.prototype.hasOwnProperty.call(obj, prop)) {
       obj[prop] = proto[prop]
     }
   }
@@ -11078,7 +11065,8 @@ var toIdentifier = require('toidentifier');
 
 
 module.exports = createError;
-module.exports.HttpError = createHttpErrorConstructor(); // Populate exports for all constructors
+module.exports.HttpError = createHttpErrorConstructor();
+module.exports.isHttpError = createIsHttpErrorFunction(module.exports.HttpError); // Populate exports for all constructors
 
 populateConstructorExports(module.exports, statuses.codes, module.exports.HttpError);
 /**
@@ -11185,7 +11173,7 @@ function createHttpErrorConstructor() {
 
 
 function createClientErrorConstructor(HttpError, name, code) {
-  var className = name.match(/Error$/) ? name : name + 'Error';
+  var className = toClassName(name);
 
   function ClientError(message) {
     // create the error object
@@ -11220,13 +11208,32 @@ function createClientErrorConstructor(HttpError, name, code) {
   return ClientError;
 }
 /**
+ * Create function to test is a value is a HttpError.
+ * @private
+ */
+
+
+function createIsHttpErrorFunction(HttpError) {
+  return function isHttpError(val) {
+    if (!val || typeof val !== 'object') {
+      return false;
+    }
+
+    if (val instanceof HttpError) {
+      return true;
+    }
+
+    return val instanceof Error && typeof val.expose === 'boolean' && typeof val.statusCode === 'number' && val.status === val.statusCode;
+  };
+}
+/**
  * Create a constructor for a server error.
  * @private
  */
 
 
 function createServerErrorConstructor(HttpError, name, code) {
-  var className = name.match(/Error$/) ? name : name + 'Error';
+  var className = toClassName(name);
 
   function ServerError(message) {
     // create the error object
@@ -11304,7 +11311,16 @@ function populateConstructorExports(exports, codes, HttpError) {
 
   exports["I'mateapot"] = deprecate.function(exports.ImATeapot, '"I\'mateapot"; use "ImATeapot" instead');
 }
-},{"depd":"../node_modules/depd/lib/browser/index.js","setprototypeof":"../node_modules/setprototypeof/index.js","statuses":"../node_modules/statuses/index.js","inherits":"../node_modules/inherits/inherits_browser.js","toidentifier":"../node_modules/toidentifier/index.js"}],"../node_modules/near-api-js/lib/utils/exponential-backoff.js":[function(require,module,exports) {
+/**
+ * Get a class name from a name identifier.
+ * @private
+ */
+
+
+function toClassName(name) {
+  return name.substr(-5) !== 'Error' ? name + 'Error' : name;
+}
+},{"depd":"../node_modules/http-errors/node_modules/depd/lib/browser/index.js","setprototypeof":"../node_modules/setprototypeof/index.js","statuses":"../node_modules/statuses/index.js","inherits":"../node_modules/inherits/inherits_browser.js","toidentifier":"../node_modules/toidentifier/index.js"}],"../node_modules/near-api-js/lib/utils/exponential-backoff.js":[function(require,module,exports) {
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 async function exponentialBackoff(startWaitTime, retryNumber, waitBackoff, getResult) {
@@ -11412,7 +11428,6 @@ exports.ErrorContext = ErrorContext;
 },{}],"../node_modules/mustache/mustache.js":[function(require,module,exports) {
 var define;
 var global = arguments[3];
-// This file has been generated from mustache.mjs
 (function (global, factory) {
   typeof exports === 'object' && typeof module !== 'undefined' ? module.exports = factory() :
   typeof define === 'function' && define.amd ? define(factory) :
@@ -11950,14 +11965,25 @@ var global = arguments[3];
    * also be a function that is used to load partial templates on the fly
    * that takes a single argument: the name of the partial.
    *
-   * If the optional `tags` argument is given here it must be an array with two
+   * If the optional `config` argument is given here, then it should be an
+   * object with a `tags` attribute or an `escape` attribute or both.
+   * If an array is passed, then it will be interpreted the same way as
+   * a `tags` attribute on a `config` object.
+   *
+   * The `tags` attribute of a `config` object must be an array with two
    * string values: the opening and closing tags used in the template (e.g.
    * [ "<%", "%>" ]). The default is to mustache.tags.
+   *
+   * The `escape` attribute of a `config` object must be a function which
+   * accepts a string as input and outputs a safely escaped string.
+   * If an `escape` function is not provided, then an HTML-safe string
+   * escaping function is used as the default.
    */
-  Writer.prototype.render = function render (template, view, partials, tags) {
+  Writer.prototype.render = function render (template, view, partials, config) {
+    var tags = this.getConfigTags(config);
     var tokens = this.parse(template, tags);
     var context = (view instanceof Context) ? view : new Context(view, undefined);
-    return this.renderTokens(tokens, context, partials, template, tags);
+    return this.renderTokens(tokens, context, partials, template, config);
   };
 
   /**
@@ -11969,7 +11995,7 @@ var global = arguments[3];
    * If the template doesn't use higher-order sections, this argument may
    * be omitted.
    */
-  Writer.prototype.renderTokens = function renderTokens (tokens, context, partials, originalTemplate, tags) {
+  Writer.prototype.renderTokens = function renderTokens (tokens, context, partials, originalTemplate, config) {
     var buffer = '';
 
     var token, symbol, value;
@@ -11978,11 +12004,11 @@ var global = arguments[3];
       token = tokens[i];
       symbol = token[0];
 
-      if (symbol === '#') value = this.renderSection(token, context, partials, originalTemplate);
-      else if (symbol === '^') value = this.renderInverted(token, context, partials, originalTemplate);
-      else if (symbol === '>') value = this.renderPartial(token, context, partials, tags);
+      if (symbol === '#') value = this.renderSection(token, context, partials, originalTemplate, config);
+      else if (symbol === '^') value = this.renderInverted(token, context, partials, originalTemplate, config);
+      else if (symbol === '>') value = this.renderPartial(token, context, partials, config);
       else if (symbol === '&') value = this.unescapedValue(token, context);
-      else if (symbol === 'name') value = this.escapedValue(token, context);
+      else if (symbol === 'name') value = this.escapedValue(token, context, config);
       else if (symbol === 'text') value = this.rawValue(token);
 
       if (value !== undefined)
@@ -11992,7 +12018,7 @@ var global = arguments[3];
     return buffer;
   };
 
-  Writer.prototype.renderSection = function renderSection (token, context, partials, originalTemplate) {
+  Writer.prototype.renderSection = function renderSection (token, context, partials, originalTemplate, config) {
     var self = this;
     var buffer = '';
     var value = context.lookup(token[1]);
@@ -12000,17 +12026,17 @@ var global = arguments[3];
     // This function is used to render an arbitrary template
     // in the current context by higher-order sections.
     function subRender (template) {
-      return self.render(template, context, partials);
+      return self.render(template, context, partials, config);
     }
 
     if (!value) return;
 
     if (isArray(value)) {
       for (var j = 0, valueLength = value.length; j < valueLength; ++j) {
-        buffer += this.renderTokens(token[4], context.push(value[j]), partials, originalTemplate);
+        buffer += this.renderTokens(token[4], context.push(value[j]), partials, originalTemplate, config);
       }
     } else if (typeof value === 'object' || typeof value === 'string' || typeof value === 'number') {
-      buffer += this.renderTokens(token[4], context.push(value), partials, originalTemplate);
+      buffer += this.renderTokens(token[4], context.push(value), partials, originalTemplate, config);
     } else if (isFunction(value)) {
       if (typeof originalTemplate !== 'string')
         throw new Error('Cannot use higher-order sections without the original template');
@@ -12021,18 +12047,18 @@ var global = arguments[3];
       if (value != null)
         buffer += value;
     } else {
-      buffer += this.renderTokens(token[4], context, partials, originalTemplate);
+      buffer += this.renderTokens(token[4], context, partials, originalTemplate, config);
     }
     return buffer;
   };
 
-  Writer.prototype.renderInverted = function renderInverted (token, context, partials, originalTemplate) {
+  Writer.prototype.renderInverted = function renderInverted (token, context, partials, originalTemplate, config) {
     var value = context.lookup(token[1]);
 
     // Use JavaScript's definition of falsy. Include empty arrays.
     // See https://github.com/janl/mustache.js/issues/186
     if (!value || (isArray(value) && value.length === 0))
-      return this.renderTokens(token[4], context, partials, originalTemplate);
+      return this.renderTokens(token[4], context, partials, originalTemplate, config);
   };
 
   Writer.prototype.indentPartial = function indentPartial (partial, indentation, lineHasNonSpace) {
@@ -12046,8 +12072,9 @@ var global = arguments[3];
     return partialByNl.join('\n');
   };
 
-  Writer.prototype.renderPartial = function renderPartial (token, context, partials, tags) {
+  Writer.prototype.renderPartial = function renderPartial (token, context, partials, config) {
     if (!partials) return;
+    var tags = this.getConfigTags(config);
 
     var value = isFunction(partials) ? partials(token[1]) : partials[token[1]];
     if (value != null) {
@@ -12058,7 +12085,8 @@ var global = arguments[3];
       if (tagIndex == 0 && indentation) {
         indentedValue = this.indentPartial(value, indentation, lineHasNonSpace);
       }
-      return this.renderTokens(this.parse(indentedValue, tags), context, partials, indentedValue, tags);
+      var tokens = this.parse(indentedValue, tags);
+      return this.renderTokens(tokens, context, partials, indentedValue, config);
     }
   };
 
@@ -12068,19 +12096,41 @@ var global = arguments[3];
       return value;
   };
 
-  Writer.prototype.escapedValue = function escapedValue (token, context) {
+  Writer.prototype.escapedValue = function escapedValue (token, context, config) {
+    var escape = this.getConfigEscape(config) || mustache.escape;
     var value = context.lookup(token[1]);
     if (value != null)
-      return mustache.escape(value);
+      return (typeof value === 'number' && escape === mustache.escape) ? String(value) : escape(value);
   };
 
   Writer.prototype.rawValue = function rawValue (token) {
     return token[1];
   };
 
+  Writer.prototype.getConfigTags = function getConfigTags (config) {
+    if (isArray(config)) {
+      return config;
+    }
+    else if (config && typeof config === 'object') {
+      return config.tags;
+    }
+    else {
+      return undefined;
+    }
+  };
+
+  Writer.prototype.getConfigEscape = function getConfigEscape (config) {
+    if (config && typeof config === 'object' && !isArray(config)) {
+      return config.escape;
+    }
+    else {
+      return undefined;
+    }
+  };
+
   var mustache = {
     name: 'mustache.js',
-    version: '4.0.1',
+    version: '4.2.0',
     tags: [ '{{', '}}' ],
     clearCache: undefined,
     escape: undefined,
@@ -12125,19 +12175,17 @@ var global = arguments[3];
   };
 
   /**
-   * Renders the `template` with the given `view` and `partials` using the
-   * default writer. If the optional `tags` argument is given here it must be an
-   * array with two string values: the opening and closing tags used in the
-   * template (e.g. [ "<%", "%>" ]). The default is to mustache.tags.
+   * Renders the `template` with the given `view`, `partials`, and `config`
+   * using the default writer.
    */
-  mustache.render = function render (template, view, partials, tags) {
+  mustache.render = function render (template, view, partials, config) {
     if (typeof template !== 'string') {
       throw new TypeError('Invalid template! Template should be a "string" ' +
                           'but "' + typeStr(template) + '" was given as the first ' +
                           'argument for mustache#render(template, view, partials)');
     }
 
-    return defaultWriter.render(template, view, partials, tags);
+    return defaultWriter.render(template, view, partials, config);
   };
 
   // Export the escaping function so that the user may override it.
@@ -13566,7 +13614,7 @@ class JsonRpcProvider extends provider_1.Provider {
 }
 exports.JsonRpcProvider = JsonRpcProvider;
 
-},{"depd":"../node_modules/near-api-js/node_modules/depd/lib/browser/index.js","./provider":"../node_modules/near-api-js/lib/providers/provider.js","../utils/web":"../node_modules/near-api-js/lib/utils/web.js","../utils/errors":"../node_modules/near-api-js/lib/utils/errors.js","borsh":"../node_modules/borsh/lib/index.js","../utils/exponential-backoff":"../node_modules/near-api-js/lib/utils/exponential-backoff.js","../utils/rpc_errors":"../node_modules/near-api-js/lib/utils/rpc_errors.js","buffer":"../node_modules/buffer/index.js"}],"../node_modules/near-api-js/lib/providers/index.js":[function(require,module,exports) {
+},{"depd":"../node_modules/depd/lib/browser/index.js","./provider":"../node_modules/near-api-js/lib/providers/provider.js","../utils/web":"../node_modules/near-api-js/lib/utils/web.js","../utils/errors":"../node_modules/near-api-js/lib/utils/errors.js","borsh":"../node_modules/borsh/lib/index.js","../utils/exponential-backoff":"../node_modules/near-api-js/lib/utils/exponential-backoff.js","../utils/rpc_errors":"../node_modules/near-api-js/lib/utils/rpc_errors.js","buffer":"../node_modules/node-libs-browser/node_modules/buffer/index.js"}],"../node_modules/near-api-js/lib/providers/index.js":[function(require,module,exports) {
 "use strict";
 /** @hidden @module */
 Object.defineProperty(exports, "__esModule", { value: true });
@@ -18011,7 +18059,7 @@ var Buffer = require("buffer").Buffer;
   }
 })();
 
-},{"process":"../node_modules/process/browser.js","buffer":"../node_modules/buffer/index.js"}],"../node_modules/near-api-js/lib/transaction.js":[function(require,module,exports) {
+},{"process":"../node_modules/process/browser.js","buffer":"../node_modules/node-libs-browser/node_modules/buffer/index.js"}],"../node_modules/near-api-js/lib/transaction.js":[function(require,module,exports) {
 var Buffer = require("buffer").Buffer;
 "use strict";
 var __importDefault = (this && this.__importDefault) || function (mod) {
@@ -18250,7 +18298,7 @@ async function signTransaction(...args) {
 }
 exports.signTransaction = signTransaction;
 
-},{"js-sha256":"../node_modules/js-sha256/src/sha256.js","./utils/enums":"../node_modules/near-api-js/lib/utils/enums.js","borsh":"../node_modules/borsh/lib/index.js","./utils/key_pair":"../node_modules/near-api-js/lib/utils/key_pair.js","buffer":"../node_modules/buffer/index.js"}],"../node_modules/near-api-js/lib/validators.js":[function(require,module,exports) {
+},{"js-sha256":"../node_modules/js-sha256/src/sha256.js","./utils/enums":"../node_modules/near-api-js/lib/utils/enums.js","borsh":"../node_modules/borsh/lib/index.js","./utils/key_pair":"../node_modules/near-api-js/lib/utils/key_pair.js","buffer":"../node_modules/node-libs-browser/node_modules/buffer/index.js"}],"../node_modules/near-api-js/lib/validators.js":[function(require,module,exports) {
 'use strict';
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
@@ -18768,7 +18816,7 @@ class Account {
 }
 exports.Account = Account;
 
-},{"bn.js":"../node_modules/near-api-js/node_modules/bn.js/lib/bn.js","depd":"../node_modules/near-api-js/node_modules/depd/lib/browser/index.js","./transaction":"../node_modules/near-api-js/lib/transaction.js","./providers":"../node_modules/near-api-js/lib/providers/index.js","borsh":"../node_modules/borsh/lib/index.js","./utils/key_pair":"../node_modules/near-api-js/lib/utils/key_pair.js","./utils/errors":"../node_modules/near-api-js/lib/utils/errors.js","./utils/rpc_errors":"../node_modules/near-api-js/lib/utils/rpc_errors.js","./constants":"../node_modules/near-api-js/lib/constants.js","./utils/exponential-backoff":"../node_modules/near-api-js/lib/utils/exponential-backoff.js","buffer":"../node_modules/buffer/index.js"}],"../node_modules/near-api-js/lib/account_multisig.js":[function(require,module,exports) {
+},{"bn.js":"../node_modules/near-api-js/node_modules/bn.js/lib/bn.js","depd":"../node_modules/depd/lib/browser/index.js","./transaction":"../node_modules/near-api-js/lib/transaction.js","./providers":"../node_modules/near-api-js/lib/providers/index.js","borsh":"../node_modules/borsh/lib/index.js","./utils/key_pair":"../node_modules/near-api-js/lib/utils/key_pair.js","./utils/errors":"../node_modules/near-api-js/lib/utils/errors.js","./utils/rpc_errors":"../node_modules/near-api-js/lib/utils/rpc_errors.js","./constants":"../node_modules/near-api-js/lib/constants.js","./utils/exponential-backoff":"../node_modules/near-api-js/lib/utils/exponential-backoff.js","buffer":"../node_modules/node-libs-browser/node_modules/buffer/index.js"}],"../node_modules/near-api-js/lib/account_multisig.js":[function(require,module,exports) {
 var Buffer = require("buffer").Buffer;
 'use strict';
 var __importDefault = (this && this.__importDefault) || function (mod) {
@@ -19085,7 +19133,7 @@ const convertActions = (actions, accountId, receiverId) => actions.map((a) => {
     return action;
 });
 
-},{"bn.js":"../node_modules/near-api-js/node_modules/bn.js/lib/bn.js","depd":"../node_modules/near-api-js/node_modules/depd/lib/browser/index.js","./account":"../node_modules/near-api-js/lib/account.js","./utils/format":"../node_modules/near-api-js/lib/utils/format.js","./utils/key_pair":"../node_modules/near-api-js/lib/utils/key_pair.js","./transaction":"../node_modules/near-api-js/lib/transaction.js","./utils/web":"../node_modules/near-api-js/lib/utils/web.js","buffer":"../node_modules/buffer/index.js"}],"../node_modules/near-api-js/lib/account_creator.js":[function(require,module,exports) {
+},{"bn.js":"../node_modules/near-api-js/node_modules/bn.js/lib/bn.js","depd":"../node_modules/depd/lib/browser/index.js","./account":"../node_modules/near-api-js/lib/account.js","./utils/format":"../node_modules/near-api-js/lib/utils/format.js","./utils/key_pair":"../node_modules/near-api-js/lib/utils/key_pair.js","./transaction":"../node_modules/near-api-js/lib/transaction.js","./utils/web":"../node_modules/near-api-js/lib/utils/web.js","buffer":"../node_modules/node-libs-browser/node_modules/buffer/index.js"}],"../node_modules/near-api-js/lib/account_creator.js":[function(require,module,exports) {
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.UrlAccountCreator = exports.LocalAccountCreator = exports.AccountCreator = void 0;
@@ -19399,7 +19447,7 @@ function validateBNLike(argMap) {
     }
 }
 
-},{"bn.js":"../node_modules/near-api-js/node_modules/bn.js/lib/bn.js","depd":"../node_modules/near-api-js/node_modules/depd/lib/browser/index.js","./providers":"../node_modules/near-api-js/lib/providers/index.js","./utils/errors":"../node_modules/near-api-js/lib/utils/errors.js"}],"../node_modules/near-api-js/lib/near.js":[function(require,module,exports) {
+},{"bn.js":"../node_modules/near-api-js/node_modules/bn.js/lib/bn.js","depd":"../node_modules/depd/lib/browser/index.js","./providers":"../node_modules/near-api-js/lib/providers/index.js","./utils/errors":"../node_modules/near-api-js/lib/utils/errors.js"}],"../node_modules/near-api-js/lib/near.js":[function(require,module,exports) {
 "use strict";
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
@@ -19813,7 +19861,7 @@ class ConnectedWalletAccount extends account_1.Account {
 }
 exports.ConnectedWalletAccount = ConnectedWalletAccount;
 
-},{"depd":"../node_modules/near-api-js/node_modules/depd/lib/browser/index.js","./account":"../node_modules/near-api-js/lib/account.js","./transaction":"../node_modules/near-api-js/lib/transaction.js","./utils":"../node_modules/near-api-js/lib/utils/index.js","borsh":"../node_modules/borsh/lib/index.js","buffer":"../node_modules/buffer/index.js"}],"../node_modules/near-api-js/lib/common-index.js":[function(require,module,exports) {
+},{"depd":"../node_modules/depd/lib/browser/index.js","./account":"../node_modules/near-api-js/lib/account.js","./transaction":"../node_modules/near-api-js/lib/transaction.js","./utils":"../node_modules/near-api-js/lib/utils/index.js","borsh":"../node_modules/borsh/lib/index.js","buffer":"../node_modules/node-libs-browser/node_modules/buffer/index.js"}],"../node_modules/near-api-js/lib/common-index.js":[function(require,module,exports) {
 "use strict";
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
@@ -20918,7 +20966,7 @@ var parent = module.bundle.parent;
 if ((!parent || !parent.isParcelRequire) && typeof WebSocket !== 'undefined') {
   var hostname = "" || location.hostname;
   var protocol = location.protocol === 'https:' ? 'wss' : 'ws';
-  var ws = new WebSocket(protocol + '://' + hostname + ':' + "45687" + '/');
+  var ws = new WebSocket(protocol + '://' + hostname + ':' + "40887" + '/');
 
   ws.onmessage = function (event) {
     checkedAssets = {};
